@@ -1758,6 +1758,8 @@ export default function App() {
   const [pinSetup, setPinSetup] = useState(false);
   const [showPinSettings, setShowPinSettings] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
+  const [notification, setNotification] = useState<{ id: string; message: string; type: "success" | "info" | "warning" } | null>(null);
+  const [notifiedMeds, setNotifiedMeds] = useState<Set<string>>(new Set());
   
   // Check if PIN is set on mount
   useEffect(() => {
@@ -1774,6 +1776,68 @@ export default function App() {
     }, 2500);
     return () => clearTimeout(timer);
   }, []);
+
+  // Notification system - check for upcoming medications
+  useEffect(() => {
+    const checkMedications = () => {
+      const now = new Date();
+      const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
+      const today = now.toISOString().split('T')[0];
+
+      medications.forEach((med) => {
+        med.times.forEach((time) => {
+          // Check if current time matches medication time (within 2 minute window)
+          const [medHour, medMin] = time.split(':').map(Number);
+          const [nowHour, nowMin] = currentTime.split(':').map(Number);
+          const timeDiff = Math.abs(medHour * 60 + medMin - (nowHour * 60 + nowMin));
+
+          if (timeDiff <= 2) {
+            const notificationKey = `${med.id}-${time}-${today}`;
+            
+            // Only notify once per medication per day
+            if (!notifiedMeds.has(notificationKey)) {
+              const todayLogs = med.history[today] || [];
+              const alreadyTaken = todayLogs.some(log => log.scheduledTime === time && log.status === "taken");
+
+              if (!alreadyTaken) {
+                // Show in-app notification
+                setNotification({
+                  id: notificationKey,
+                  message: `Time to take ${med.name}`,
+                  type: "info"
+                });
+
+                // Clear notification after 5 seconds
+                setTimeout(() => setNotification(null), 5000);
+
+                // Show browser notification if permitted
+                if ("Notification" in window && Notification.permission === "granted") {
+                  new Notification("MedTracker Reminder", {
+                    body: `Time to take ${med.name} (${med.dosage})`,
+                    icon: "/favicon.svg",
+                    tag: notificationKey,
+                  });
+                }
+
+                setNotifiedMeds(prev => new Set(prev).add(notificationKey));
+              }
+            }
+          }
+        });
+      });
+    };
+
+    // Request notification permission on mount
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+
+    // Check every minute
+    const interval = setInterval(checkMedications, 60000);
+    checkMedications(); // Check immediately on mount
+
+    return () => clearInterval(interval);
+  }, [medications, notifiedMeds]);
 
   const T = isDark ? THEMES.dark : THEMES.light;
   const tilt = useTilt();
@@ -1846,6 +1910,28 @@ export default function App() {
       overflowY: "auto",
       transition: "background 0.5s ease, color 0.3s ease",
     }}>
+      
+      {/* IN-APP NOTIFICATION TOAST */}
+      {notification && (
+        <div style={{
+          position: "fixed",
+          top: 20,
+          left: 16,
+          right: 16,
+          maxWidth: 398,
+          background: notification.type === "info" ? "rgba(102, 126, 234, 0.9)" : notification.type === "success" ? "#10b981" : "#f59e0b",
+          color: "white",
+          padding: "16px",
+          borderRadius: "12px",
+          boxShadow: "0 10px 25px rgba(0, 0, 0, 0.2)",
+          zIndex: 999,
+          animation: "slideDown 0.3s ease-out",
+          fontSize: "14px",
+          fontWeight: "600",
+        }}>
+          {notification.message}
+        </div>
+      )}
       
       {/* HEADER */}
       <div style={{
