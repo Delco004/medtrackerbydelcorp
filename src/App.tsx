@@ -129,18 +129,24 @@ function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T) => voi
   const [storedValue, setStoredValue] = useState<T>(() => {
     try {
       const item = window.localStorage.getItem(key);
-      return item ? JSON.parse(item) : initialValue;
-    } catch {
+      const parsed = item ? JSON.parse(item) : initialValue;
+      console.log(`[localStorage] Loaded ${key}:`, parsed);
+      return parsed;
+    } catch (error) {
+      console.error(`[localStorage] Error loading ${key}:`, error);
       return initialValue;
     }
   });
 
   const setValue = useCallback((value: T) => {
     try {
+      console.log(`[localStorage] Saving ${key}:`, value);
       setStoredValue(value);
-      window.localStorage.setItem(key, JSON.stringify(value));
+      const jsonValue = JSON.stringify(value);
+      window.localStorage.setItem(key, jsonValue);
+      console.log(`[localStorage] Successfully saved ${key}`);
     } catch (error) {
-      console.error("Storage error:", error);
+      console.error(`[localStorage] Error saving ${key}:`, error);
     }
   }, [key]);
 
@@ -1750,7 +1756,7 @@ function PinSettingsModal({ T, onClose, onSave, onDisable }: { T: Theme; onClose
 // MAIN APP
 // ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [isDark, setIsDark] = useState(false);
+  const [isDark, setIsDark] = useLocalStorage("medtracker_theme_dark", false);
   const [tab, setTab] = useState("dashboard");
   const [showAdd, setShowAdd] = useState(false);
   const [medications, setMedications] = useLocalStorage<Medication[]>("medtracker_medications", []);
@@ -1760,6 +1766,22 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [notification, setNotification] = useState<{ id: string; message: string; type: "success" | "info" | "warning" } | null>(null);
   const [notifiedMeds, setNotifiedMeds] = useState<Set<string>>(new Set());
+  const [userProfile, setUserProfile] = useLocalStorage("medtracker_user_profile", {
+    name: "User",
+    email: "",
+    condition: "",
+    doctor: "",
+  });
+  const [showProfile, setShowProfile] = useState(false);
+  
+  // Debug: Log medications on mount
+  useEffect(() => {
+    console.log("App mounted. Medications from localStorage:", medications);
+    console.log("localStorage content:", {
+      meds: localStorage.getItem("medtracker_medications"),
+      pin: localStorage.getItem("medtracker_pin") ? "SET" : "NOT SET"
+    });
+  }, []);
   
   // Check if PIN is set on mount
   useEffect(() => {
@@ -1786,12 +1808,12 @@ export default function App() {
 
       medications.forEach((med) => {
         med.times.forEach((time) => {
-          // Check if current time matches medication time (within 2 minute window)
+          // Check if current time matches medication time (within 1 minute window)
           const [medHour, medMin] = time.split(':').map(Number);
           const [nowHour, nowMin] = currentTime.split(':').map(Number);
           const timeDiff = Math.abs(medHour * 60 + medMin - (nowHour * 60 + nowMin));
 
-          if (timeDiff <= 2) {
+          if (timeDiff <= 1) {
             const notificationKey = `${med.id}-${time}-${today}`;
             
             // Only notify once per medication per day
@@ -1800,6 +1822,8 @@ export default function App() {
               const alreadyTaken = todayLogs.some(log => log.scheduledTime === time && log.status === "taken");
 
               if (!alreadyTaken) {
+                console.log(`[Notification] Time to take ${med.name} at ${time}`);
+                
                 // Show in-app notification
                 setNotification({
                   id: notificationKey,
@@ -1832,8 +1856,8 @@ export default function App() {
       Notification.requestPermission();
     }
 
-    // Check every minute
-    const interval = setInterval(checkMedications, 60000);
+    // Check every 30 seconds (more frequent)
+    const interval = setInterval(checkMedications, 30000);
     checkMedications(); // Check immediately on mount
 
     return () => clearInterval(interval);
@@ -1874,7 +1898,10 @@ export default function App() {
   }, [setMedications, medications]);
 
   const handleAddMed = useCallback((newMed: Medication) => {
-    setMedications([...medications, newMed]);
+    console.log("Adding medication:", newMed);
+    const updated = [...medications, newMed];
+    console.log("Updated medications array:", updated);
+    setMedications(updated);
   }, [medications, setMedications]);
 
   const handleDeleteMed = useCallback((medId: number) => {
@@ -1955,7 +1982,7 @@ export default function App() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-            <div onClick={() => setIsDark(d => !d)} style={{
+            <div onClick={() => setIsDark(!isDark)} style={{
               width: 52, height: 28, borderRadius: 14,
               background: T.toggleBg,
               border: `1px solid ${T.border}`,
@@ -1986,6 +2013,15 @@ export default function App() {
               fontSize: 12, fontWeight: 700, color: T.accent, transition: "all 0.2s",
             }} title="PIN Settings">
               PIN
+            </button>
+            <button onClick={() => setShowProfile(true)} style={{
+              width: 36, height: 36, borderRadius: 8,
+              background: T.surface,
+              border: `1px solid ${T.border}`,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 12, fontWeight: 700, color: T.accent, transition: "all 0.2s",
+            }} title="Profile">
+              👤
             </button>
             <button onClick={() => setShowAdd(true)} style={{
               background: `linear-gradient(135deg, ${T.accent}, ${T.accent}cc)`,
@@ -2387,6 +2423,68 @@ export default function App() {
           setIsLocked(false);
           setShowPinSettings(false);
         }} />
+      )}
+
+      {/* PROFILE MODAL */}
+      {showProfile && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(0, 0, 0, 0.5)", display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 1000, padding: 16,
+        }}>
+          <div style={{
+            background: T.surface, borderRadius: 16, padding: 24, maxWidth: 400, width: "100%",
+            boxShadow: "0 20px 50px rgba(0, 0, 0, 0.3)", maxHeight: "80vh", overflowY: "auto",
+          }}>
+            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 20, color: T.text }}>Your Profile</div>
+            
+            {/* Profile Fields */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: T.textDim, textTransform: "uppercase", display: "block", marginBottom: 8 }}>Name</label>
+              <input type="text" value={userProfile.name} onChange={(e) => setUserProfile({...userProfile, name: e.target.value})}
+                style={{width: "100%", padding: "12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.bg, color: T.text, fontFamily: "inherit", fontSize: 14}} />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: T.textDim, textTransform: "uppercase", display: "block", marginBottom: 8 }}>Email</label>
+              <input type="email" value={userProfile.email} onChange={(e) => setUserProfile({...userProfile, email: e.target.value})}
+                style={{width: "100%", padding: "12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.bg, color: T.text, fontFamily: "inherit", fontSize: 14}} />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: T.textDim, textTransform: "uppercase", display: "block", marginBottom: 8 }}>Medical Condition</label>
+              <input type="text" value={userProfile.condition} onChange={(e) => setUserProfile({...userProfile, condition: e.target.value})}
+                placeholder="e.g., Hypertension, Diabetes" style={{width: "100%", padding: "12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.bg, color: T.text, fontFamily: "inherit", fontSize: 14}} />
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: T.textDim, textTransform: "uppercase", display: "block", marginBottom: 8 }}>Doctor Name</label>
+              <input type="text" value={userProfile.doctor} onChange={(e) => setUserProfile({...userProfile, doctor: e.target.value})}
+                style={{width: "100%", padding: "12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.bg, color: T.text, fontFamily: "inherit", fontSize: 14}} />
+            </div>
+
+            {/* Buttons */}
+            <div style={{display: "flex", gap: 12}}>
+              <button onClick={() => setShowProfile(false)} style={{
+                flex: 1, padding: "12px", borderRadius: 8, background: T.bg, border: `1px solid ${T.border}`,
+                cursor: "pointer", fontWeight: 700, color: T.text, fontSize: 14, fontFamily: "inherit",
+                transition: "all 0.2s",
+              }}>
+                Close
+              </button>
+              <button onClick={() => {
+                console.log("Profile saved:", userProfile);
+                setShowProfile(false);
+              }} style={{
+                flex: 1, padding: "12px", borderRadius: 8, background: "rgba(102, 126, 234, 0.9)", border: "none",
+                cursor: "pointer", fontWeight: 700, color: "white", fontSize: 14, fontFamily: "inherit",
+                transition: "all 0.2s",
+              }}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
