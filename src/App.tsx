@@ -1857,7 +1857,7 @@ export default function App() {
     }
 
     // Check every 30 seconds (more frequent)
-    const interval = setInterval(checkMedications, 30000);
+    const interval = setInterval(checkMedications, 10000);
     checkMedications(); // Check immediately on mount
 
     return () => clearInterval(interval);

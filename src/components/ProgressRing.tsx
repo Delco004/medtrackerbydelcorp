@@ -11,7 +11,7 @@ const ProgressRing: React.FC<ProgressRingProps> = ({
   percentage, 
   label, 
   size = 200, 
-  strokeWidth = 14 
+  strokeWidth = 20 
 }) => {
   const radius = (size - strokeWidth) / 2;
   const circumference = radius * 2 * Math.PI;
